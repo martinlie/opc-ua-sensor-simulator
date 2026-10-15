@@ -1,0 +1,199 @@
+# Nordvik Refinery (NVR) - a fictional plant used to stress test OPC UA clients.
+#
+# Asset tree: Plant / Area / Unit / Equipment / Tag
+#
+# Tag definition fields (per equipment template):
+#   key    local name, used in calc expressions and by lab tags (follows:)
+#   isa    ISA-5.1 style letters, e.g. PT, TI, FIC, LIC
+#   kind   pv (sensor, default) | loop (_PV/_SP/_OP) | cv (calculated) | lv (lab) | status (Boolean _PV)
+#   range  [lo, hi] engineering range, published as EURange
+#   base   normal operating value, or [min, max] to vary it per equipment instance
+#   rate   fast (default) | slow  -- publish rate class
+#   noise  white noise, std as fraction of span
+#   drift  slow random drift, std as fraction of span
+#   tau    drift time constant in seconds
+#   daily  amplitude of a 24 h cycle as fraction of span
+#   tau_p  loop process time constant in seconds
+#   gate   status key; the value drops to lo while that equipment is stopped
+#   expr   calc expression over sibling keys (loops also expose <key>_sp, <key>_op)
+#   follows  lab tags: key of the online PV the lab sample correlates with
+#
+# For lab (lv) tags noise and drift are fractions of the value itself, not of the range.
+
+plant:
+  id: NVR
+  name: Nordvik Refinery
+
+defaults:
+  pv:     {noise: 0.003, drift: 0.02, tau: 900, daily: 0.0}
+  loop:   {noise: 0.002, drift: 0.02, tau: 600, tau_p: 60, sp_step_rate: 0.5}
+  lv:     {noise: 0.01, drift: 0.04, tau: 21600}
+  status: {trip_rate: 0.02, down_time: 900}
+
+templates:
+  pump:
+    prefix: P
+    desc: Centrifugal pump
+    tags:
+      - {key: run,  isa: XS,  kind: status, desc: Running feedback}
+      - {key: pd,   isa: PT,  desc: Discharge pressure, eu: barg, range: [0, 40], base: [12, 25], gate: run}
+      - {key: amps, isa: II,  desc: Motor current, eu: A, range: [0, 250], base: [60, 140], gate: run}
+      - {key: vib,  isa: VI,  desc: Bearing vibration, eu: mm/s, range: [0, 20], base: [1.5, 4], noise: 0.01, gate: run}
+      - {key: tb,   isa: TI,  desc: Bearing temperature, eu: degC, range: [0, 120], base: [45, 70], daily: 0.02}
+      - {key: flow, isa: FIC, kind: loop, desc: Discharge flow control, eu: m3/h, range: [0, 400], base: [120, 300], tau_p: 20}
+      - {key: hyd,  isa: JI,  kind: cv, desc: Hydraulic power, eu: kW, range: [0, 500], expr: "flow * pd / 36"}
+
+  compressor:
+    prefix: K
+    desc: Centrifugal compressor
+    tags:
+      - {key: run,   isa: XS,  kind: status, desc: Running feedback, trip_rate: 0.01}
+      - {key: ps,    isa: PT,  desc: Suction pressure, eu: barg, range: [0, 10], base: [2, 4]}
+      - {key: pd,    isa: PT,  desc: Discharge pressure, eu: barg, range: [0, 40], base: [15, 25], gate: run}
+      - {key: td,    isa: TI,  desc: Discharge temperature, eu: degC, range: [0, 200], base: [110, 150]}
+      - {key: vib,   isa: VI,  desc: Shaft vibration, eu: um, range: [0, 150], base: [20, 45], noise: 0.01, gate: run}
+      - {key: speed, isa: SIC, kind: loop, desc: Speed control, eu: rpm, range: [0, 12000], base: [8000, 10000], tau_p: 30}
+      - {key: ratio, isa: PRI, kind: cv, desc: Compression ratio, eu: "-", range: [0, 20], expr: "(pd + 1.013) / (ps + 1.013)"}
+      - {key: surge, isa: UI,  kind: cv, desc: Surge margin, eu: "%", range: [0, 100], expr: "clip(35 - 2 * (ratio - 6) + 0.002 * (speed - 9000), 0, 100)"}
+
+  column:
+    prefix: C
+    desc: Distillation column
+    tags:
+      - {key: ttop,   isa: TI,  desc: Top temperature, eu: degC, range: [0, 400], base: [110, 160], daily: 0.01}
+      - {key: tbot,   isa: TI,  desc: Bottom temperature, eu: degC, range: [0, 400], base: [300, 360]}
+      - {key: ptop,   isa: PT,  desc: Top pressure, eu: barg, range: [0, 5], base: [0.8, 1.1]}
+      - {key: pbot,   isa: PT,  desc: Bottom pressure, eu: barg, range: [0, 5], base: [1.3, 1.7]}
+      - {key: lvl,    isa: LIC, kind: loop, desc: Bottom level control, eu: "%", range: [0, 100], base: [40, 60], tau_p: 180}
+      - {key: reflux, isa: FIC, kind: loop, desc: Reflux flow control, eu: m3/h, range: [0, 300], base: [80, 160]}
+      - {key: dp,     isa: PDI, kind: cv, desc: Column differential pressure, eu: mbar, range: [0, 2000], expr: "(pbot - ptop) * 1000"}
+
+  exchanger:
+    prefix: E
+    desc: Shell and tube heat exchanger
+    tags:
+      - {key: thi,  isa: TI, desc: Hot side inlet temperature, eu: degC, range: [0, 400], base: [180, 280]}
+      - {key: tho,  isa: TI, desc: Hot side outlet temperature, eu: degC, range: [0, 400], base: [90, 150]}
+      - {key: tci,  isa: TI, desc: Cold side inlet temperature, eu: degC, range: [0, 200], base: [25, 60], daily: 0.03}
+      - {key: tco,  isa: TI, desc: Cold side outlet temperature, eu: degC, range: [0, 200], base: [70, 140]}
+      - {key: fc,   isa: FI, desc: Cold side flow, eu: m3/h, range: [0, 500], base: [100, 300]}
+      - {key: duty, isa: QI, kind: cv, desc: Heat duty, eu: MW, range: [0, 50], expr: "fc * 1.163e-3 * (tco - tci)"}
+      - {key: lmtd, isa: TDI, kind: cv, desc: Log mean temperature difference, eu: degC, range: [0, 300],
+         expr: "((thi - tco) - (tho - tci)) / log(maximum(maximum(thi - tco, 0.1) / maximum(tho - tci, 0.1), 1.0001))"}
+
+  furnace:
+    prefix: H
+    desc: Fired heater
+    tags:
+      - {key: cot,   isa: TIC, kind: loop, desc: Coil outlet temperature control, eu: degC, range: [0, 500], base: [340, 420], tau_p: 120}
+      - {key: stack, isa: TI,  desc: Stack temperature, eu: degC, range: [0, 600], base: [160, 240]}
+      - {key: o2,    isa: AI,  desc: Flue gas oxygen, eu: "%", range: [0, 21], base: [2, 4], noise: 0.005}
+      - {key: fg,    isa: FI,  desc: Fuel gas flow, eu: Nm3/h, range: [0, 5000], base: [1500, 3000]}
+      - {key: draft, isa: PI,  desc: Firebox draft, eu: mbar, range: [-10, 5], base: [-3, -1]}
+      - {key: eff,   isa: UI,  kind: cv, desc: Thermal efficiency, eu: "%", range: [0, 100], expr: "clip(100 - 0.045 * (stack - 25) - 0.6 * o2, 0, 100)"}
+
+  drum:
+    prefix: V
+    desc: Separator drum
+    tags:
+      - {key: lvl,  isa: LIC, kind: loop, desc: Level control, eu: "%", range: [0, 100], base: [40, 60], tau_p: 120}
+      - {key: pres, isa: PIC, kind: loop, desc: Pressure control, eu: barg, range: [0, 20], base: [3, 12], tau_p: 15}
+      - {key: temp, isa: TI,  desc: Temperature, eu: degC, range: [0, 200], base: [35, 80]}
+
+  reactor:
+    prefix: R
+    desc: Fixed bed reactor
+    tags:
+      - {key: tin,  isa: TI,  desc: Bed inlet temperature, eu: degC, range: [0, 500], base: [320, 350]}
+      - {key: tmid, isa: TI,  desc: Bed middle temperature, eu: degC, range: [0, 500], base: [355, 375]}
+      - {key: tout, isa: TI,  desc: Bed outlet temperature, eu: degC, range: [0, 500], base: [380, 400]}
+      - {key: dp,   isa: PDI, desc: Bed differential pressure, eu: bar, range: [0, 10], base: [1, 3], drift: 0.05, tau: 7200}
+      - {key: pres, isa: PIC, kind: loop, desc: Reactor pressure control, eu: barg, range: [0, 200], base: [40, 90], tau_p: 45}
+      - {key: dt,   isa: TDI, kind: cv, desc: Bed temperature rise, eu: degC, range: [0, 100], expr: "tout - tin"}
+      - {key: wabt, isa: TI,  kind: cv, desc: Weighted average bed temperature, eu: degC, range: [0, 500], expr: "(tin + 2 * tmid + tout) / 4"}
+
+  tank:
+    prefix: T
+    desc: Storage tank
+    tags:
+      - {key: lvl,  isa: LI, desc: Level, eu: "%", range: [0, 100], base: [20, 80], rate: slow, drift: 0.15, tau: 14400, noise: 0.0005}
+      - {key: temp, isa: TI, desc: Product temperature, eu: degC, range: [0, 80], base: [15, 40], rate: slow, daily: 0.05}
+      - {key: fin,  isa: FI, desc: Inflow, eu: m3/h, range: [0, 1000], base: [100, 500]}
+      - {key: fout, isa: FI, desc: Outflow, eu: m3/h, range: [0, 1000], base: [100, 500]}
+      - {key: inv,  isa: WI, kind: cv, desc: Inventory, eu: m3, range: [0, 25000], rate: slow, expr: "lvl / 100 * 25000"}
+
+  stream:
+    prefix: S
+    desc: Product stream sample point
+    tags:
+      - {key: flow,     isa: FI, desc: Product flow, eu: t/h, range: [0, 500], base: [20, 200]}
+      - {key: dens,     isa: DI, desc: Online density analyzer, eu: kg/m3, range: [600, 1000], base: [720, 880], noise: 0.002}
+      - {key: dens_lab, isa: DI, kind: lv, desc: Density at 15 degC (lab), eu: kg/m3, range: [600, 1000], follows: dens, noise: 0.003}
+      - {key: sulfur,   isa: AI, kind: lv, desc: Sulfur content (lab), eu: ppm, range: [0, 5000], base: [10, 1500]}
+      - {key: flash,    isa: TI, kind: lv, desc: Flash point (lab), eu: degC, range: [0, 150], base: [40, 70]}
+
+  analyzer:
+    prefix: Q
+    desc: Emissions analyzer
+    tags:
+      - {key: nox,  isa: AI, desc: NOx, eu: mg/Nm3, range: [0, 500], base: [80, 150], rate: slow}
+      - {key: so2,  isa: AI, desc: SO2, eu: mg/Nm3, range: [0, 1000], base: [50, 300], rate: slow}
+      - {key: co,   isa: AI, desc: CO, eu: mg/Nm3, range: [0, 500], base: [10, 60], noise: 0.01, rate: slow}
+      - {key: o2,   isa: AI, desc: Oxygen, eu: "%", range: [0, 21], base: [3, 6], rate: slow}
+      - {key: noxc, isa: AI, kind: cv, desc: NOx corrected to 3% O2, eu: mg/Nm3, range: [0, 1000], rate: slow, expr: "nox * 18 / maximum(21 - o2, 0.5)"}
+
+  generator:
+    prefix: G
+    desc: Gas turbine generator
+    tags:
+      - {key: run,   isa: XS, kind: status, desc: Breaker closed, trip_rate: 0.005}
+      - {key: power, isa: JI, desc: Active power, eu: MW, range: [0, 60], base: [25, 45], gate: run}
+      - {key: react, isa: JI, desc: Reactive power, eu: MVAr, range: [-20, 40], base: [8, 15], gate: run}
+      - {key: volt,  isa: EI, desc: Terminal voltage, eu: kV, range: [0, 15], base: 11, noise: 0.001, drift: 0.005}
+      - {key: freq,  isa: SI, desc: Frequency, eu: Hz, range: [45, 55], base: 50, noise: 0.0005, drift: 0.002, tau: 60}
+      - {key: amps,  isa: II, desc: Stator current, eu: A, range: [0, 4000], base: [1500, 2500], gate: run}
+      - {key: pf,    isa: UI, kind: cv, desc: Power factor, eu: "-", range: [0, 1], expr: "power / maximum(sqrt(power ** 2 + react ** 2), 0.001)"}
+
+areas:
+  - id: A10
+    name: Crude
+    units:
+      - {id: 11, name: Crude Distillation, equipment: {furnace: 1, column: 1, pump: 3, exchanger: 3, drum: 1, stream: 3}}
+      - {id: 12, name: Vacuum Distillation, equipment: {furnace: 1, column: 1, pump: 2, exchanger: 2, drum: 1, stream: 2}}
+      - {id: 13, name: Desalter, equipment: {drum: 2, pump: 2, exchanger: 1, stream: 1}}
+  - id: A20
+    name: Conversion
+    units:
+      - {id: 21, name: Fluid Catalytic Cracker, equipment: {reactor: 1, column: 1, compressor: 1, pump: 2, exchanger: 2, drum: 1, stream: 2, analyzer: 1}}
+      - {id: 22, name: Hydrocracker, equipment: {reactor: 2, furnace: 1, compressor: 1, column: 1, pump: 2, exchanger: 2, drum: 1, stream: 2}}
+      - {id: 23, name: Alkylation, equipment: {reactor: 1, column: 1, pump: 2, drum: 1, stream: 1}}
+  - id: A30
+    name: Treating
+    units:
+      - {id: 31, name: Naphtha Hydrotreater, equipment: {reactor: 1, furnace: 1, compressor: 1, pump: 1, exchanger: 1, drum: 1, stream: 1}}
+      - {id: 32, name: Diesel Hydrotreater, equipment: {reactor: 1, furnace: 1, compressor: 1, column: 1, pump: 2, exchanger: 1, drum: 1, stream: 1}}
+      - {id: 33, name: Sulfur Recovery, equipment: {reactor: 1, drum: 1, exchanger: 1, pump: 1, analyzer: 1}}
+  - id: A40
+    name: Reforming
+    units:
+      - {id: 41, name: Catalytic Reformer, equipment: {reactor: 2, furnace: 1, compressor: 1, column: 1, pump: 1, exchanger: 1, stream: 1}}
+      - {id: 42, name: Aromatics Extraction, equipment: {column: 2, pump: 2, exchanger: 2, stream: 2}}
+  - id: A50
+    name: Utilities
+    units:
+      - {id: 51, name: Steam Generation, equipment: {furnace: 1, drum: 1, pump: 2, analyzer: 1}}
+      - {id: 52, name: Cooling Water, equipment: {pump: 3, exchanger: 1, tank: 1}}
+      - {id: 53, name: Instrument Air, equipment: {compressor: 2, drum: 1}}
+      - {id: 54, name: Flare, equipment: {drum: 1, analyzer: 1}}
+      - {id: 55, name: Power Generation, equipment: {generator: 2, exchanger: 1}}
+  - id: A60
+    name: Offsites
+    units:
+      - {id: 61, name: Tank Farm, equipment: {tank: 8, pump: 2}}
+      - {id: 62, name: Blending, equipment: {pump: 2, stream: 3, tank: 2}}
+      - {id: 63, name: Loading, equipment: {pump: 2, stream: 1}}
+  - id: A70
+    name: Environment
+    units:
+      - {id: 71, name: Wastewater Treatment, equipment: {tank: 2, pump: 2, analyzer: 1, drum: 1}}
+      - {id: 72, name: Emissions Monitoring, equipment: {analyzer: 3}}

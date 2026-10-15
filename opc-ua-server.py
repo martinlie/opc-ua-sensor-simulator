@@ -1,66 +1,47 @@
-#Simple Python OPC-UA Server
-#Sending out 2 data values
-#Flo Pachinger / flopach, Cisco Systems, July 2020
+#OPC UA plant simulation server - Nordvik Refinery, for stress testing OPC UA clients
+#Based on the simple OPC-UA server by Flo Pachinger / flopach, Cisco Systems, July 2020
 #Script based on the server example https://github.com/FreeOpcUa/python-opcua
 #LGPL-3.0 License
 
-import logging
+import argparse
 import asyncio
-import pandas as pd
+import logging
 
-from asyncua import ua, Server
-from asyncua.common.methods import uamethod
+from simulator.plant import DEFAULT_CONFIG, load_plant
+from simulator.server import serve
 
-logging.basicConfig(level=logging.INFO)
-_logger = logging.getLogger('asyncua')
 
-@uamethod
-def func(parent, value):
-    return value * 2
+def parse_args():
+    p = argparse.ArgumentParser(description="OPC UA server simulating a large process plant.")
+    p.add_argument("--endpoint", default="opc.tcp://127.0.0.1:4840/opcua/", help="server endpoint URL")
+    p.add_argument("--config", default=str(DEFAULT_CONFIG), help="plant definition YAML")
+    p.add_argument("--trains", type=int, default=1,
+                   help="parallel trains per unit; 1 gives ~1k tags, 10 ~10k, 100 ~100k")
+    p.add_argument("--fast-ms", type=float, default=1000, help="update period for fast tags (ms)")
+    p.add_argument("--slow-s", type=float, default=10, help="update period for slow tags (s)")
+    p.add_argument("--lab-s", type=float, default=3600, help="lab sample interval (s)")
+    p.add_argument("--faults", type=float, default=0.01,
+                   help="share of sensor and lab tags in a fault at any time (0 disables)")
+    p.add_argument("--fault-duration", type=float, default=600, help="mean fault duration (s)")
+    p.add_argument("--seed", type=int, default=42, help="random seed, same seed gives the same plant")
+    p.add_argument("--export-tags", metavar="CSV", help="write the tag list (NodeIds, ranges, units) to a CSV file")
+    p.add_argument("--no-metadata", action="store_true",
+                   help="skip EURange/EngineeringUnits properties (fewer nodes, faster start)")
+    p.add_argument("--stats-s", type=float, default=10, help="throughput log interval (s)")
+    p.add_argument("--log-level", default="INFO")
+    return p.parse_args()
 
-async def main():
-    # setup our server
-    server = Server()
-    await server.init()
-    server.set_endpoint('opc.tcp://127.0.0.1:4840/opcua/')
-    server.set_server_name("DevNet OPC-UA Test Server")
 
-    # setup our own namespace, not really necessary but should as spec
-    uri = 'http://devnetiot.com/opcua/'
-    idx = await server.register_namespace(uri)
+def main():
+    args = parse_args()
+    logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("asyncua").setLevel(logging.WARNING)
+    plant = load_plant(args.config, trains=args.trains, seed=args.seed)
+    try:
+        asyncio.run(serve(plant, args))
+    except KeyboardInterrupt:
+        pass
 
-    # populating our address space
-    # server.nodes, contains links to very common nodes like objects and root
-    obj_vplc = await server.nodes.objects.add_object(idx, 'vPLC1')
-    var_temperature = await obj_vplc.add_variable(idx, 'temperature', 0)
-    var_pressure = await obj_vplc.add_variable(idx, 'pressure', 0)
-    var_pumpsetting = await obj_vplc.add_variable(idx, 'pumpsetting', 0)
 
-    # Read Sensor Data from Kaggle
-    df = pd.read_csv("sensor.csv")
-    # Only use sensor data from 03 and 01 (preference)
-    sensor_data = pd.concat([df["sensor_03"], df["sensor_01"]], axis=1)
-
-    _logger.info('Starting server!')
-    async with server:
-        # run forever and iterate over the dataframe
-        while True:
-            for row in sensor_data.itertuples():
-                # if below the mean use different setting - just for testing
-                if row[1] < df["sensor_03"].mean():
-                    setting = "standard"
-                else:
-                    setting = "speed"
-
-                # Writing Variables
-                await var_temperature.write_value(float(row[1]))
-                await var_pressure.write_value(float(row[2]))
-                await var_pumpsetting.write_value(str(setting))
-                await asyncio.sleep(1)
-
-if __name__ == '__main__':
-    #python 3.6 or lower
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
-    #python 3.7 onwards (comment lines above)
-    #asyncio.run(main())
+if __name__ == "__main__":
+    main()
