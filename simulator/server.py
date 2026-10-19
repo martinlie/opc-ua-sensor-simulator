@@ -11,6 +11,9 @@ from asyncua import Server, ua
 
 from .signals import BAD, GOOD, UNCERTAIN, Simulation
 
+# asyncua 1.x calls this DataValue field StatusCode_, 2.x StatusCode
+_STATUS_KW = "StatusCode_" if "StatusCode_" in ua.DataValue.__dataclass_fields__ else "StatusCode"
+
 _logger = logging.getLogger("simulator")
 
 NAMESPACE_URI = "urn:opc-ua-sensor-simulator:nordvik-refinery"
@@ -213,7 +216,7 @@ class Publisher:
             else:
                 variant = ua.Variant(float(out[i]), ua.VariantType.Double)
             src = now_dt if source_times is None else source_times[n]
-            dv = ua.DataValue(variant, StatusCode_=QUALITY[int(qual[i])], SourceTimestamp=src,
+            dv = ua.DataValue(variant, **{_STATUS_KW: QUALITY[int(qual[i])]}, SourceTimestamp=src,
                               ServerTimestamp=now_dt)
             await aspace.write_attribute_value(self.nodes[i], value_attr, dv)
             if n % 2000 == 1999:
