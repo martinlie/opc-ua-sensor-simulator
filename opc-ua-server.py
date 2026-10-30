@@ -23,6 +23,12 @@ def parse_args():
     p.add_argument("--faults", type=float, default=0.01,
                    help="share of sensor and lab tags in a fault at any time (0 disables)")
     p.add_argument("--fault-duration", type=float, default=600, help="mean fault duration (s)")
+    p.add_argument("--no-alarms", dest="alarms", action="store_false",
+                   help="disable simulated alarms, warnings and messages (OPC UA events)")
+    p.add_argument("--upsets-per-hour", type=float, default=20,
+                   help="process upsets that push a PV into alarm, per 1000 alarmed tags")
+    p.add_argument("--messages-per-hour", type=float, default=15,
+                   help="warning and operator message events, per 1000 alarmed tags")
     p.add_argument("--seed", type=int, default=42, help="random seed, same seed gives the same plant")
     p.add_argument("--export-tags", metavar="CSV", help="write the tag list (NodeIds, ranges, units) to a CSV file")
     p.add_argument("--no-metadata", action="store_true",
