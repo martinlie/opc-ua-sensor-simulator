@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import numpy as np
 from asyncua import Server, ua
 
+from .alarms import AlarmEngine
 from .signals import BAD, GOOD, UNCERTAIN, Simulation
 
 # asyncua 1.x calls this DataValue field StatusCode_, 2.x StatusCode
@@ -57,7 +58,7 @@ def _object_item(nodeid, parent, bname, display, desc, ref=REF_COMPONENT):
     item.NodeClass = ua.NodeClass.Object
     item.TypeDefinition = ua.NodeId(ua.ObjectIds.BaseObjectType)
     attrs = ua.ObjectAttributes()
-    attrs.EventNotifier = 0
+    attrs.EventNotifier = 1  # SubscribeToEvents, so clients can watch alarms at any level
     attrs.DisplayName = ua.LocalizedText(display)
     attrs.Description = ua.LocalizedText(desc)
     item.NodeAttributes = attrs
@@ -165,7 +166,7 @@ def export_tags(path, plant, ns):
 class Publisher:
     """Runs the simulation on a fixed tick and writes changed values into the address space."""
 
-    def __init__(self, server, plant, nodes, args):
+    def __init__(self, server, ns, plant, nodes, args):
         self.server = server
         self.aspace = server.iserver.aspace
         self.plant = plant
@@ -175,6 +176,7 @@ class Publisher:
         self.stats_s = args.stats_s
         self.sim = Simulation(plant, dt=self.period, lab_interval=args.lab_s, fault_share=args.faults,
                               fault_duration=args.fault_duration, seed=args.seed, now=time.time())
+        self.alarms = AlarmEngine(server, ns, plant, self.sim, args, time.time()) if args.alarms else None
         kinds = np.array([t.kind for t in plant.tags])
         rates = np.array([t.rate for t in plant.tags])
         self.is_bool = np.array([t.vtype == "Boolean" for t in plant.tags])
@@ -225,6 +227,10 @@ class Publisher:
         self.last_quality[indices] = qual[indices]
         self.writes += len(indices)
 
+    def _alarm_stats(self):
+        a = self.alarms
+        return f" | alarms active {a.active_count}, events {a.events}" if a else ""
+
     def _lab_times(self, indices):
         return [datetime.fromtimestamp(s, timezone.utc) for s in self.sim.lab_source_time(indices)]
 
@@ -247,6 +253,8 @@ class Publisher:
             now_dt = datetime.fromtimestamp(now, timezone.utc)
             self._read_client_setpoints()
             lab = sim.step(now)
+            if self.alarms:
+                self.alarms.apply_upsets(now)
 
             due = self.fast_mask | self.event_mask
             if tick % self.slow_every == 0:
@@ -260,6 +268,9 @@ class Publisher:
             lab_q = np.flatnonzero(self.lab_mask_all & (sim.quality != self.last_quality))
             if len(lab_q):
                 await self._write(lab_q, now_dt, self._lab_times(lab_q))
+
+            if self.alarms:
+                await self.alarms.step(now)
 
             elapsed = time.monotonic() - t0
             busy += elapsed
@@ -276,9 +287,10 @@ class Publisher:
             if span >= self.stats_s:
                 w = self.writes - stats_writes
                 _logger.info("%.0f writes/s | tick avg %.1f ms max %.1f ms | load %.0f%% | overruns %d | "
-                             "faults %s | client SP writes %d",
+                             "faults %s | client SP writes %d%s",
                              w / span, 1000 * busy / max(ticks, 1), 1000 * worst, 100 * busy / span, overruns,
-                             sim.fault_counts(), self.sp_client_writes)
+                             sim.fault_counts(), self.sp_client_writes,
+                             self._alarm_stats())
                 stats_t0, stats_writes, busy, worst, overruns, ticks = time.monotonic(), self.writes, 0.0, 0.0, 0, 0
             await asyncio.sleep(delay)
 
@@ -298,7 +310,7 @@ async def serve(plant, args):
     if args.export_tags:
         export_tags(args.export_tags, plant, ns)
 
-    publisher = Publisher(server, plant, nodes, args)
+    publisher = Publisher(server, ns, plant, nodes, args)
     async with server:
         _logger.info("Server listening on %s", args.endpoint)
         await publisher.run()

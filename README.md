@@ -101,6 +101,28 @@ By default 1 % of sensor and lab tags are in a fault at any time (`--faults`). T
 
 Calculated values inherit faulty inputs, just as they would in a real control system.
 
+## Alarms and events
+
+The server publishes OPC UA events (Alarms & Conditions style) so clients can be tested against alarm floods and messages. Subscribe to events on the `Server` object (all events) or on the plant, an area, a unit or an equipment object (events from below it). Use `AlarmConditionType` for alarms, or `BaseEventType` to get everything.
+
+| Event | Type | Severity |
+| --- | --- | --- |
+| Limit alarm LL / L / H / HH on every sensor and loop PV | `ExclusiveLimitAlarmType` fields | 500 (L, H), 800 (LL, HH) |
+| Equipment stopped (a status tag goes to stopped) | `AlarmConditionType` | 700 |
+| Sensor failure (PV with bad quality) | `AlarmConditionType` | 300 |
+| Warnings, e.g. "Strainer differential pressure trending high on 11-P101" | `BaseEventType` | 400 |
+| Operator messages, e.g. "Shift handover completed in U11" | `BaseEventType` | 100 |
+
+Limits are set around each tag's base value (H and L at 10 % of the range, HH and LL at 18 %) with a 1 % deadband. Alarms come from the data: process upsets push a random PV out of its band for 1 to 10 minutes, and normal drift, setpoint steps, equipment trips and sensor faults raise alarms as well. The alarm fields are `ActiveState/Id`, `AckedState/Id`, `Retain`, `Severity`, `Message`, `SourceName`, `ConditionName` and `LimitState/CurrentState`. Retained conditions are kept for `ConditionRefresh`.
+
+Acknowledgement is simulated: an alarm is acknowledged by a made-up operator 5 s to 3 min after it goes active. The `Acknowledge` and `Confirm` methods are not implemented.
+
+```
+--no-alarms               disable alarms, warnings and messages
+--upsets-per-hour N       upsets per 1000 alarmed tags (default 20)
+--messages-per-hour N     warnings and messages per 1000 alarmed tags (default 15)
+```
+
 ## Scaling and stress testing
 
 `--trains N` duplicates every unit as parallel trains (`U11`, `U11B`, `U11C`, …):
