@@ -1,6 +1,6 @@
 # OPC UA Plant Simulation Server
 
-An OPC UA server, written in Python, that simulates a large made-up refinery: the **Nordvik Refinery (NVR)**. It is built for stress testing OPC UA clients. The plant has a realistic ISA-95 style asset tree and thousands of tags that behave like real process data: slowly drifting sensors with noise, PI control loops, calculated values, hourly lab results, equipment trips and failing sensors.
+An OPC UA server, written in Python, that simulates a large made-up refinery: the **Nordvik Refinery (NVR)**. It is built for stress testing OPC UA clients. The plant has a realistic ISA-95 style asset tree and thousands of tags that behave like real process data: slowly drifting sensors with noise, PI control loops, calculated values, hourly lab results, equipment trips and failing sensors. It also publishes alarms, warnings and messages as OPC UA events.
 
 The plant size can be scaled from about 1,000 tags to over 100,000.
 
@@ -8,7 +8,7 @@ This is a fork of [flopach/opc-ua-sensor-simulator](https://github.com/flopach/o
 
 ## Installation
 
-Python 3.9 or newer is required.
+Python 3.10 or newer is required (asyncua 2.x; it also fixes a client connection error on Python 3.14 and later).
 
 ```bash
 git clone https://github.com/martinlie/opc-ua-sensor-simulator
@@ -164,6 +164,9 @@ python opc-ua-server.py --trains 10 --export-tags tags.csv
 --lab-s S             lab sample interval (default 3600)
 --faults SHARE        share of sensor/lab tags in a fault (default 0.01, 0 disables)
 --fault-duration S    mean fault duration (default 600)
+--no-alarms           disable alarms, warnings and messages (events)
+--upsets-per-hour N   process upsets per 1000 alarmed tags (default 20)
+--messages-per-hour N warnings and messages per 1000 alarmed tags (default 15)
 --seed N              random seed (default 42)
 --export-tags CSV     write the tag list to a CSV file
 --no-metadata         skip EURange/EngineeringUnits properties
@@ -173,7 +176,7 @@ python opc-ua-server.py --trains 10 --export-tags tags.csv
 
 ## Testing
 
-Any OPC UA client works, for example [UaExpert](https://www.unified-automation.com/products/development-tools/uaexpert.html) or the [FreeOpcUa client GUI](https://github.com/FreeOpcUa/opcua-client-gui).
+Any OPC UA client works, for example [UaExpert](https://www.unified-automation.com/products/development-tools/uaexpert.html) or the [FreeOpcUa client GUI](https://github.com/FreeOpcUa/opcua-client-gui). To see alarms, subscribe to events on the `Server` object, see [Alarms and events](#alarms-and-events).
 
 ## License
 
