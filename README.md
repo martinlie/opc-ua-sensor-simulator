@@ -54,7 +54,7 @@ ns=2;s=NVR.A10.U11.11-H101.11-TIC011_PV
 
 They stay the same across restarts. Unit and equipment base values are seeded per unit, so they don't change when you scale the plant up with `--trains`. Client configurations built against a small plant still work against a large one.
 
-Every variable has a `Description` (with the engineering unit), and by default also the `EURange` and `EngineeringUnits` (UNECE codes) properties of an `AnalogItemType`. Status tags are `TwoStateDiscreteType` with `TrueState`/`FalseState`.
+Every variable has a `Description` (with the engineering unit), and by default also the `EURange` and `EngineeringUnits` (UNECE codes) properties of an `AnalogItemType`. Status tags are `TwoStateDiscreteType` with `TrueState`/`FalseState`. Setpoints (`_SP`) have an `HA Configuration` object (`HasHistoricalConfiguration`) with `Stepped = true`, since a setpoint holds its value until changed. It is skipped with `--no-metadata`.
 
 ## Tag naming
 

@@ -36,6 +36,7 @@ QUALITY = {
 REF_COMPONENT = ua.NodeId(ua.ObjectIds.HasComponent)
 REF_PROPERTY = ua.NodeId(ua.ObjectIds.HasProperty)
 REF_ORGANIZES = ua.NodeId(ua.ObjectIds.Organizes)
+REF_HIST_CONFIG = ua.NodeId(ua.ObjectIds.HasHistoricalConfiguration)
 
 
 def _eu_info(eu):
@@ -49,16 +50,17 @@ def _eu_info(eu):
                             UnitId=unit_id, DisplayName=ua.LocalizedText(eu), Description=ua.LocalizedText(eu))
 
 
-def _object_item(nodeid, parent, bname, display, desc, ref=REF_COMPONENT):
+def _object_item(nodeid, parent, bname, display, desc, ref=REF_COMPONENT, typedef=ua.ObjectIds.BaseObjectType,
+                 notifier=1):
     item = ua.AddNodesItem()
     item.RequestedNewNodeId = nodeid
     item.BrowseName = bname
     item.ParentNodeId = parent
     item.ReferenceTypeId = ref
     item.NodeClass = ua.NodeClass.Object
-    item.TypeDefinition = ua.NodeId(ua.ObjectIds.BaseObjectType)
+    item.TypeDefinition = ua.NodeId(typedef)
     attrs = ua.ObjectAttributes()
-    attrs.EventNotifier = 1  # SubscribeToEvents, so clients can watch alarms at any level
+    attrs.EventNotifier = notifier  # SubscribeToEvents, so clients can watch alarms at any level
     attrs.DisplayName = ua.LocalizedText(display)
     attrs.Description = ua.LocalizedText(desc)
     item.NodeAttributes = attrs
@@ -138,6 +140,15 @@ async def build_address_space(server, ns, plant, metadata=True, batch=5000):
                     items.append(_variable_item(node, eq_node, qn(t.name), t.name, desc, variant, dtype, typedef,
                                                 writable=(t.kind == "sp")))
                     if metadata:
+                        if t.kind == "sp":
+                            # setpoints hold their value until changed: declare them as stepped for history
+                            hc = ua.NodeId(f"{t.path}.HA Configuration", ns)
+                            items.append(_object_item(hc, node, ua.QualifiedName("HA Configuration", 0),
+                                                      "HA Configuration", "", ref=REF_HIST_CONFIG,
+                                                      typedef=ua.ObjectIds.HistoricalDataConfigurationType,
+                                                      notifier=0))
+                            items.append(_property_item(hc, ns, "Stepped", ua.Variant(True, ua.VariantType.Boolean),
+                                                        ua.ObjectIds.Boolean))
                         if t.vtype == "Boolean":
                             for name, text in (("TrueState", "Running"), ("FalseState", "Stopped")):
                                 items.append(_property_item(node, ns, name, ua.Variant(ua.LocalizedText(text)),
